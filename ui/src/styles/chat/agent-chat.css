@@ -239,6 +239,15 @@
   flex-shrink: 0;
 }
 
+.agent-chat__avatar--logo {
+  background: transparent;
+}
+
+.agent-chat__avatar--logo svg {
+  width: 48px;
+  height: 48px;
+}
+
 .agent-chat__avatar--sm {
   width: 24px;
   height: 24px;

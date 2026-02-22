@@ -440,11 +440,11 @@ function renderWelcomeState(props: ChatProps): TemplateResult {
       ${
         avatar
           ? html`<img src=${avatar} alt=${name} style="width:56px; height:56px; border-radius:50%; object-fit:cover;" />`
-          : html`<div class="agent-chat__avatar">${initials}</div>`
+          : html`<div class="agent-chat__avatar agent-chat__avatar--logo">${icons.lobster}</div>`
       }
       <h2>${name}</h2>
       <div class="agent-chat__badges">
-        <span class="agent-chat__badge">${icons.spark} Ready to chat</span>
+        <span class="agent-chat__badge">${icons.lobster} Ready to chat</span>
       </div>
       <p class="agent-chat__hint">
         Type a message below &middot; <kbd>/</kbd> for commands
