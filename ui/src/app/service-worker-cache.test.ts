@@ -192,6 +192,16 @@ describe("Control UI service worker notification scope", () => {
       { target: "chat?session=42#latest", navigatedUrl: `${nestedScope}chat?session=42#latest` },
     ),
     notificationScenario(
+      "opens a scope-relative approval route with its Gateway handoff fragment",
+      nestedScope,
+      [],
+      {
+        target: "approve/exec%3A1#gatewayUrl=wss%3A%2F%2Fgateway.example",
+        openedUrl:
+          "https://control.example/openclaw/approve/exec%3A1#gatewayUrl=wss%3A%2F%2Fgateway.example",
+      },
+    ),
+    notificationScenario(
       "prefers a later exact explicit route over an unrelated nested app tab",
       nestedScope,
       [`${nestedScope}settings`, `${nestedScope}chat?session=42#latest`],

@@ -9,6 +9,7 @@ import {
 } from "./kysely-sync.js";
 import {
   createWebPushVapidKeyPair,
+  ensureWebPushSubscriptionBindingColumns,
   webPushSubscriptionFromRow,
   webPushSubscriptionToRow,
   webPushSubscriptionsEqual,
@@ -192,6 +193,7 @@ function migrateIntoDatabase(params: {
   let importedVapidKeys = false;
   runOpenClawStateWriteTransaction(
     ({ db }) => {
+      ensureWebPushSubscriptionBindingColumns(db);
       const webPushDb = getNodeSqliteKysely<WebPushDatabase>(db);
       const expectedSubscriptions = new Map<string, WebPushSubscription>();
       for (const [endpointHash, legacySubscription] of params.legacy.subscriptions) {

@@ -2,18 +2,26 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import webPush from "web-push";
-import { closeOpenClawStateDatabase } from "../state/openclaw-state-db.js";
+import { tableHasColumn } from "../state/openclaw-state-db-schema-helpers.js";
+import {
+  closeOpenClawStateDatabase,
+  openOpenClawStateDatabase,
+} from "../state/openclaw-state-db.js";
 import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
 import {
   createWebPushVapidKeyPair,
+  hashWebPushEndpoint,
+  listBoundWebPushSubscriptions,
   listWebPushSubscriptions,
   readPersistedVapidKeyPair,
 } from "./push-web-store.js";
 import {
   broadcastWebPush,
   clearWebPushSubscriptionByEndpoint,
+  prepareWebPushNotificationSender,
   registerWebPushSubscription,
   resolveVapidKeys,
 } from "./push-web.js";
@@ -191,6 +199,71 @@ describe("subscription CRUD", () => {
     await expect(fs.stat(path.join(tmpDir, "push"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("lazily adds and persists authenticated device bindings", async () => {
+    const environment = { ...process.env, OPENCLAW_STATE_DIR: tmpDir };
+    const database = openOpenClawStateDatabase({ env: environment });
+    database.db.exec("ALTER TABLE web_push_subscriptions DROP COLUMN device_id;");
+    database.db.exec("ALTER TABLE web_push_subscriptions DROP COLUMN user_profile_id;");
+    expect(tableHasColumn(database.db, "web_push_subscriptions", "device_id")).toBe(false);
+    expect(tableHasColumn(database.db, "web_push_subscriptions", "user_profile_id")).toBe(false);
+
+    const subscription = await registerWebPushSubscription({
+      endpoint,
+      keys,
+      binding: { deviceId: "browser-device", userProfileId: "profile-1" },
+      baseDir: tmpDir,
+    });
+
+    expect(tableHasColumn(database.db, "web_push_subscriptions", "device_id")).toBe(true);
+    expect(tableHasColumn(database.db, "web_push_subscriptions", "user_profile_id")).toBe(true);
+    expect(listBoundWebPushSubscriptions(tmpDir)).toEqual([
+      { ...subscription, deviceId: "browser-device", userProfileId: "profile-1" },
+    ]);
+  });
+
+  it("keeps legacy unbound rows test-only until browser reconciliation", async () => {
+    await registerWebPushSubscription({ endpoint, keys, baseDir: tmpDir });
+    expect(listBoundWebPushSubscriptions(tmpDir)).toEqual([]);
+
+    const rebound = await registerWebPushSubscription({
+      endpoint,
+      keys,
+      binding: { deviceId: "browser-device", userProfileId: null },
+      baseDir: tmpDir,
+    });
+    expect(listBoundWebPushSubscriptions(tmpDir)).toEqual([
+      { ...rebound, deviceId: "browser-device", userProfileId: null },
+    ]);
+  });
+
+  it("preserves bindings when an older writer updates only the original columns", async () => {
+    const subscription = await registerWebPushSubscription({
+      endpoint,
+      keys,
+      binding: { deviceId: "browser-device", userProfileId: "profile-1" },
+      baseDir: tmpDir,
+    });
+    closeOpenClawStateDatabase();
+
+    const olderWriter = new DatabaseSync(path.join(tmpDir, "state", "openclaw.sqlite"));
+    olderWriter
+      .prepare(
+        "UPDATE web_push_subscriptions SET auth = ?, updated_at_ms = ? WHERE endpoint_hash = ?",
+      )
+      .run("older-auth", subscription.updatedAtMs + 1, hashWebPushEndpoint(endpoint));
+    olderWriter.close();
+
+    expect(listBoundWebPushSubscriptions(tmpDir)).toEqual([
+      {
+        ...subscription,
+        keys: { ...subscription.keys, auth: "older-auth" },
+        updatedAtMs: subscription.updatedAtMs + 1,
+        deviceId: "browser-device",
+        userProfileId: "profile-1",
+      },
+    ]);
+  });
+
   it("preserves unrelated concurrent registrations", async () => {
     await Promise.all(
       ["a", "b", "c"].map((suffix) =>
@@ -303,6 +376,37 @@ describe("sending", () => {
     expect(results.every((result) => result.ok)).toBe(true);
     expect(vi.mocked(webPush.setVapidDetails)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(webPush.sendNotification)).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends a bounded high-urgency notification only to selected subscriptions", async () => {
+    const selected = await registerWebPushSubscription({
+      endpoint: "https://push.example.com/selected",
+      keys,
+      baseDir: tmpDir,
+    });
+    await registerWebPushSubscription({
+      endpoint: "https://push.example.com/not-selected",
+      keys,
+      baseDir: tmpDir,
+    });
+
+    const send = await prepareWebPushNotificationSender(tmpDir);
+    await expect(
+      send({
+        subscriptions: [selected],
+        payload: { title: "Approval", url: "/approve/1" },
+        deliveryOptions: { TTL: 60, urgency: "high", timeout: 10_000 },
+      }),
+    ).resolves.toEqual([{ ok: true, subscriptionId: selected.subscriptionId, statusCode: 201 }]);
+    expect(vi.mocked(webPush.sendNotification)).toHaveBeenCalledOnce();
+    expect(vi.mocked(webPush.sendNotification)).toHaveBeenCalledWith(
+      {
+        endpoint: selected.endpoint,
+        keys: selected.keys,
+      },
+      JSON.stringify({ title: "Approval", url: "/approve/1" }),
+      { TTL: 60, urgency: "high", timeout: 10_000 },
+    );
   });
 
   it("does not delete a subscription re-registered during an expired send", async () => {

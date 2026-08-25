@@ -1,6 +1,8 @@
 // Approval request delivery fans out external routes while preserving the
-// approval record's visibility boundary for iOS targets.
+// approval record's visibility boundary for mobile and browser push targets.
 import { GATEWAY_CLIENT_IDS } from "../../../packages/gateway-protocol/src/client-info.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { deliverApprovalRequestWebPush } from "../approval-web-push.js";
 import type { ExecApprovalRecord } from "../exec-approval-manager.js";
 import { isApprovalRecordVisibleToClient } from "./approval-shared.js";
 import type { GatewayClient } from "./types.js";
@@ -15,7 +17,10 @@ type ApprovalRequestDelivery = readonly [
   errorLabel: string,
 ];
 
-type ApprovalDeliveryLogContext = { logGateway?: { error?: (message: string) => void } };
+type ApprovalDeliveryLogContext = {
+  getRuntimeConfig: () => OpenClawConfig;
+  logGateway?: { error?: (message: string) => void };
+};
 
 function resolveFirstSuccessfulApprovalDelivery(
   deliveryTasks: readonly Promise<boolean>[],
@@ -67,6 +72,22 @@ export function runApprovalRequestDeliveries<TPayload>(params: {
       }),
     ];
   });
+  try {
+    const webPushDelivery = deliverApprovalRequestWebPush({
+      record: params.record,
+      cfg: params.context.getRuntimeConfig(),
+    });
+    if (webPushDelivery !== false) {
+      deliveryTasks.push(
+        Promise.resolve(webPushDelivery).catch((err: unknown) => {
+          params.context.logGateway?.error?.(`approval Web Push request failed: ${String(err)}`);
+          return false;
+        }),
+      );
+    }
+  } catch (err) {
+    params.context.logGateway?.error?.(`approval Web Push request failed: ${String(err)}`);
+  }
   if (deliveryTasks.length === 0) {
     return false;
   }

@@ -1,6 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ExecApprovalManager } from "../exec-approval-manager.js";
 import { runApprovalRequestDeliveries } from "./approval-request-delivery.js";
+
+const deliverApprovalRequestWebPushMock = vi.hoisted(() => vi.fn(() => false));
+
+vi.mock("../approval-web-push.js", () => ({
+  deliverApprovalRequestWebPush: deliverApprovalRequestWebPushMock,
+}));
 
 const approvalDeliveryCallers = [
   {
@@ -45,12 +51,35 @@ async function expectPromptDelivery(delivery: boolean | Promise<boolean>): Promi
   }
 }
 
+function deliveryContext(error?: (message: string) => void) {
+  return {
+    getRuntimeConfig: () => ({}),
+    ...(error ? { logGateway: { error } } : {}),
+  };
+}
+
 describe("runApprovalRequestDeliveries", () => {
+  beforeEach(() => {
+    deliverApprovalRequestWebPushMock.mockReset();
+    deliverApprovalRequestWebPushMock.mockReturnValue(false);
+  });
+
   it("returns false synchronously when no external routes exist", () => {
     const manager = new ExecApprovalManager();
     const record = manager.create({ command: "echo ok" }, 60_000, "approval-no-delivery");
 
-    expect(runApprovalRequestDeliveries({ context: {}, record })).toBe(false);
+    expect(runApprovalRequestDeliveries({ context: deliveryContext(), record })).toBe(false);
+  });
+
+  it("counts a successful approval Web Push as an external route", async () => {
+    const manager = new ExecApprovalManager();
+    const record = manager.create({ command: "echo ok" }, 60_000, "approval-web-push");
+    deliverApprovalRequestWebPushMock.mockResolvedValue(true);
+
+    const delivery = runApprovalRequestDeliveries({ context: deliveryContext(), record });
+
+    await expect(delivery).resolves.toBe(true);
+    expect(deliverApprovalRequestWebPushMock).toHaveBeenCalledWith({ record, cfg: {} });
   });
 
   it.each(approvalDeliveryCallers)(
@@ -61,7 +90,7 @@ describe("runApprovalRequestDeliveries", () => {
       const started: string[] = [];
 
       const delivery = runApprovalRequestDeliveries({
-        context: {},
+        context: deliveryContext(),
         record,
         forward: [
           async () => {
@@ -92,7 +121,7 @@ describe("runApprovalRequestDeliveries", () => {
       const started: string[] = [];
 
       const delivery = runApprovalRequestDeliveries({
-        context: {},
+        context: deliveryContext(),
         record,
         forward: [
           async () => {
@@ -126,7 +155,7 @@ describe("runApprovalRequestDeliveries", () => {
     const error = vi.fn();
 
     const delivery = runApprovalRequestDeliveries({
-      context: { logGateway: { error } },
+      context: deliveryContext(error),
       record,
       forward: [
         async () => {
@@ -168,7 +197,7 @@ describe("runApprovalRequestDeliveries", () => {
     });
 
     const delivery = runApprovalRequestDeliveries({
-      context: { logGateway: { error } },
+      context: deliveryContext(error),
       record,
       forward: [async () => true, "forward failed"],
       iosPush: [async () => await pendingPush, "push failed"],
@@ -204,7 +233,7 @@ describe("runApprovalRequestDeliveries", () => {
       });
 
       const delivery = runApprovalRequestDeliveries({
-        context: { logGateway: { error } },
+        context: deliveryContext(error),
         record,
         forward: [
           async () => {

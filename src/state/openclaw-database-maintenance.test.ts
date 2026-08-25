@@ -81,6 +81,24 @@ describe("OpenClaw database maintenance schema validation", () => {
     }
   });
 
+  it("keeps Web Push binding columns compatible with the previous schema", () => {
+    const previousSchema = OPENCLAW_STATE_SCHEMA_SQL.replace(
+      "  auth TEXT NOT NULL,\n  device_id TEXT,\n  user_profile_id TEXT,\n",
+      "  auth TEXT NOT NULL,\n",
+    );
+    const database = createGlobalDatabase();
+    try {
+      expect(previousSchema).not.toBe(OPENCLAW_STATE_SCHEMA_SQL);
+      expect(() =>
+        assertSqliteSchemaContains(database, "previous global schema", previousSchema, {
+          allowCompatibleAdditiveColumns: true,
+        }),
+      ).not.toThrow();
+    } finally {
+      database.close();
+    }
+  });
+
   it("keeps the cron authority companion table compatible with the previous schema", () => {
     const start = OPENCLAW_STATE_SCHEMA_SQL.indexOf(
       "CREATE TABLE IF NOT EXISTS cron_job_runtime_authorities (",
@@ -224,6 +242,8 @@ describe("OpenClaw database maintenance schema validation", () => {
       "session_groups.worktree INTEGER",
       "installed_plugin_index.workspace_dir TEXT",
       "secret_store_entries.allowed_hosts TEXT",
+      "web_push_subscriptions.device_id TEXT",
+      "web_push_subscriptions.user_profile_id TEXT",
       "skill_workshop_proposals.claim_released_time INTEGER",
     ]);
 
