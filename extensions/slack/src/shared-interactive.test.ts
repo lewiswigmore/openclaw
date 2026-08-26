@@ -469,6 +469,40 @@ describe("buildSlackPresentationBlocks", () => {
     ]);
   });
 
+  it("keeps question choices native when custom input stays on the text path", () => {
+    const questionId = "ask_0123456789abcdef0123456789abcdef";
+    const presentation: MessagePresentation = {
+      blocks: [
+        { type: "text", text: "Tap a choice, or reply with your own answer." },
+        {
+          type: "buttons",
+          buttons: [
+            ...["Staging", "Production"].map((label) => ({
+              label,
+              action: { type: "question" as const, questionId, optionValue: label },
+            })),
+            {
+              label: "Other…",
+              action: { type: "question" as const, questionId, intent: "custom-input" as const },
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(canRenderSlackPresentation(presentation)).toBe(true);
+    expect(buildSlackPresentationBlocks(presentation)).toMatchObject([
+      { type: "section" },
+      {
+        type: "actions",
+        elements: [
+          { action_id: "openclaw:question_button:1:1" },
+          { action_id: "openclaw:question_button:1:2" },
+        ],
+      },
+    ]);
+  });
+
   it("renders presentation blocks in authored order", () => {
     const blocks = buildSlackPresentationBlocks({
       blocks: [

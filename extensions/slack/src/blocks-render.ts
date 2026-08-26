@@ -175,6 +175,15 @@ function resolveSlackButtonTarget(
   return legacyUrl ? { kind: "link", url: legacyUrl } : undefined;
 }
 
+function isSlackTextFallbackButton(
+  button: MessagePresentationButtonsBlock["buttons"][number],
+): boolean {
+  // ask_user already names the free-text path in visible copy. Omitting only
+  // this action keeps declared choices native without a composer hook.
+  const action = resolveMessagePresentationButtonAction(button);
+  return action?.type === "question" && "intent" in action && action.intent === "custom-input";
+}
+
 function resolveSlackOptionTarget(
   option: MessagePresentationSelectBlock["options"][number],
 ): Exclude<SlackActionTarget, { kind: "link" } | { kind: "question" }> | undefined {
@@ -448,9 +457,13 @@ export function canRenderSlackPresentation(
       continue;
     }
     if (block.type === "buttons") {
+      let nativeButtonCount = 0;
       const allButtonsRenderable =
-        block.buttons.length <= SLACK_ACTION_BLOCK_ELEMENTS_MAX &&
         block.buttons.every((button, choiceIndex) => {
+          if (isSlackTextFallbackButton(button)) {
+            return true;
+          }
+          nativeButtonCount += 1;
           if (!isWithinSlackLimit(button.label, SLACK_ACTION_LABEL_MAX)) {
             return false;
           }
@@ -460,7 +473,7 @@ export function canRenderSlackPresentation(
               ? isWithinSlackLimit(target.url, SLACK_BUTTON_URL_MAX)
               : isWithinSlackLimit(target.value, SLACK_BUTTON_VALUE_MAX)
             : false;
-        });
+        }) && nativeButtonCount <= SLACK_ACTION_BLOCK_ELEMENTS_MAX;
       if (!allButtonsRenderable) {
         return false;
       }
